@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "atividade-pca"
+version = "0.1.0"
+description = ""
+authors = ["marianamf0 <“mmf.marianaf@gmail.com”>"]
+readme = "README.md"
+packages = [{include = "atividade_pca"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+numpy = "^2.3.2"
+matplotlib = "^3.10.5"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
