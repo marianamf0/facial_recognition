@@ -16,8 +16,8 @@ def eval_classifier(y_real, y_pred):
     Returns:
         int: Number of samples where argmax(y_pred) == argmax(y_real).
     """
-    pred_labels = np.argmax(y_pred, axis=1)
-    true_labels = np.argmax(y_real, axis=1)
+    pred_labels = np.argmax(y_pred, axis=y_pred.ndim-1)
+    true_labels = np.argmax(y_real, axis=y_real.ndim-1)
 
     return np.sum(pred_labels == true_labels)
 
@@ -29,9 +29,28 @@ def generate_results(percentage_success:list, time:int, name:str):
     print(f"Desvio Padrão: {np.std(percentage_success):6.2f}")
     print(f"Tempo: {time:.2f} s")
 
+def generate_metrics(y_real, y_pred):
+    y_true_bin = np.asarray(y_real).astype(int).ravel()
+    y_pred_bin = np.asarray(y_pred).astype(int).ravel()
+
+    tp = np.sum((y_true_bin==1) & (y_pred_bin==1))
+    tn = np.sum((y_true_bin==0) & (y_pred_bin==0))
+    fp = np.sum((y_true_bin==0) & (y_pred_bin==1))
+    fn = np.sum((y_true_bin==1) & (y_pred_bin==0))
+    total = tp+tn+fp+fn
+
+    acc  = (tp+tn)/total if total else 0.0
+    fpr  = fp/(fp+tn)    if (fp+tn) else 0.0   # intruso aceito
+    fnr  = fn/(tp+fn)    if (tp+fn) else 0.0   # autorizado negado
+    tpr  = tp/(tp+fn)    if (tp+fn) else 0.0   # sensibilidade
+    prec = tp/(tp+fp)    if (tp+fp) else 0.0
+
+    return {"Acurácia":acc, "Taxa de Falsos Positivos":fpr,
+            "Taxa de Falsos Negativos":fnr, "Precisão":prec, "Sensibilidade":tpr}
+    
 
 def linear_classifier(x_values, y_values, training_data_rate:float=0.8, 
-                      number_simulations:int=50, verbose:bool = False):
+                      number_simulations:int=50, verbose:bool = False, bool_metrics:bool = False, intruder_idx:int = 0):
     """
     Repeated train/test evaluation of a linear multi-class classifier (least-squares with intercept).
 
@@ -48,8 +67,7 @@ def linear_classifier(x_values, y_values, training_data_rate:float=0.8,
         verbose (bool): If True, prints a metrics summary via `generate_results`.
 
     Returns:
-        np.ndarray: Final weight matrix of shape (n_features + 1, n_classes),
-                    learned on the last train/test split.
+        List[dict]: Per-round metrics as produced by `generate_metrics`.
     """
     start_time = time.time()
     quantity_of_data=x_values.shape[0]
@@ -58,7 +76,7 @@ def linear_classifier(x_values, y_values, training_data_rate:float=0.8,
     quantity_of_train_data = int(np.floor(quantity_of_data*training_data_rate))
     quantity_of_test_data = quantity_of_data - quantity_of_train_data
     
-    percentage_success = []
+    percentage_success, metrics = [], []
     for _ in range(number_simulations): 
         index_data = np.random.permutation(quantity_of_data)
         x_shuff, y_shuff = x_values[index_data], y_values[index_data]
@@ -72,15 +90,21 @@ def linear_classifier(x_values, y_values, training_data_rate:float=0.8,
         number_success = eval_classifier(y_real=y_test, y_pred=y_pred_test)
         percentage_success.append(100*(number_success/quantity_of_test_data))
         
+        if bool_metrics: 
+            y_true_is_auth = (y_test.argmax(axis=1) != intruder_idx)
+            y_pred_is_auth = (y_pred_test.argmax(axis=1) != intruder_idx)
+            metrics.append(generate_metrics(y_real=y_true_is_auth, y_pred=y_pred_is_auth))
+        
     end_time = time.time()
     if verbose: 
         generate_results(percentage_success=percentage_success, time=end_time-start_time, name="MQ")
 
-    return weight
+    return metrics
 
 
 def perceptron_logistic_classifier(x_values, y_values, number_neurons:int, training_data_rate:float=0.8, 
-        number_of_rounds:int=50, epoch_numbers:int=1, learning_rate:float=0.01, verbose:bool = False): 
+        number_of_rounds:int=50, epoch_numbers:int=1, learning_rate:float=0.01, verbose:bool = False, 
+        bool_metrics:bool = False, intruder_idx:int = 0): 
     """
     Multi-class single-layer perceptron, trained by SGD, evaluated via repeated train/test resampling.
 
@@ -103,8 +127,7 @@ def perceptron_logistic_classifier(x_values, y_values, number_neurons:int, train
         verbose (bool): If True, prints a metrics summary via `generate_results`.
 
     Returns:
-        np.ndarray: Final weight matrix of shape (n_features + 1, n_classes),
-                    learned on the last train/test split.
+        List[dict]: Per-round metrics as produced by `generate_metrics`.
 
     """
     
@@ -113,7 +136,7 @@ def perceptron_logistic_classifier(x_values, y_values, number_neurons:int, train
     quantity_of_train_data = int(np.floor(quantity_of_data*training_data_rate))
     quantity_of_test_data = quantity_of_data - quantity_of_train_data
     
-    number_success, percentage_success = [], []
+    percentage_success, metrics = [], []
     for _ in range(number_of_rounds): 
         index_data = np.random.permutation(quantity_of_data)
         x_shuff, y_shuff = x_values[index_data], y_values[index_data]
@@ -143,17 +166,21 @@ def perceptron_logistic_classifier(x_values, y_values, number_neurons:int, train
         
         number_success = eval_classifier(y_real=y_test, y_pred=y_pred_test)
         percentage_success.append(100*(number_success/quantity_of_test_data))
+        if bool_metrics: 
+            y_true_is_auth = (y_test.argmax(axis=1) != intruder_idx)
+            y_pred_is_auth = (y_pred_test.argmax(axis=1) != intruder_idx)
+            metrics.append(generate_metrics(y_real=y_true_is_auth, y_pred=y_pred_is_auth))
         
     end_time = time.time()
     if verbose: 
         generate_results(percentage_success=percentage_success, time=end_time-start_time, name="PL")
 
-    return weight
+    return metrics
 
 
 def mlp_sigmoid_classifier(x_values, y_values, number_neurons:int,  number_hidden_neurons:int=10,
-                   training_data_rate:float=0.8, number_of_rounds:int=50,
-                   epoch_numbers:int=20, learning_rate:float=0.01, verbose:bool = False):
+        training_data_rate:float=0.8, number_of_rounds:int=50, epoch_numbers:int=20, 
+        learning_rate:float=0.01, verbose:bool = False, bool_metrics:bool = False, intruder_idx:int = 0):
     """
     Train/evaluate a one-hidden-layer MLP classifier with sigmoid activations via per-sample SGD.
 
@@ -178,9 +205,7 @@ def mlp_sigmoid_classifier(x_values, y_values, number_neurons:int,  number_hidde
         verbose (bool): If True, prints accuracy statistics and runtime.
 
     Returns:
-        tuple[np.ndarray, np.ndarray]:
-            weight1: (number_hidden_neurons, n_features + 1)  # input→hidden (with bias)
-            weight2: (number_neurons,        number_hidden_neurons + 1)  # hidden→output (with bias)
+        List[dict]: Per-round metrics as produced by `generate_metrics`.
 
     """
     
@@ -189,7 +214,7 @@ def mlp_sigmoid_classifier(x_values, y_values, number_neurons:int,  number_hidde
     quantity_of_train_data = int(np.floor(quantity_of_data * training_data_rate))
     quantity_of_test_data = quantity_of_data - quantity_of_train_data
 
-    percentage_success = []
+    percentage_success, metrics = [], []
     for _ in range(number_of_rounds):
         index_data = np.random.permutation(quantity_of_data)
         x_shuff, y_shuff = x_values[index_data], y_values[index_data]
@@ -229,17 +254,21 @@ def mlp_sigmoid_classifier(x_values, y_values, number_neurons:int,  number_hidde
 
         number_success = eval_classifier(y_real=y_test, y_pred=y_pred_test)
         percentage_success.append(100.0 * number_success / quantity_of_test_data)
-
+        if bool_metrics: 
+            y_true_is_auth = (y_test.argmax(axis=1) != intruder_idx)
+            y_pred_is_auth = (y_pred_test.argmax(axis=1) != intruder_idx)
+            metrics.append(generate_metrics(y_real=y_true_is_auth, y_pred=y_pred_is_auth))
+    
     end_time = time.time()
     if verbose:
         generate_results(percentage_success=percentage_success, time=end_time-start_time, name="MLP-1H(Sigmoid)")
         
-    return weight1, weight2
+    return metrics
 
 
 def mlp_tanh_classifier_2h(x_values, y_values, number_neurons:int, number_hidden_neurons:int=64, 
         number_hidden_neurons2:int=32, training_data_rate:float=0.8, number_of_rounds:int=50,
-        epoch_numbers:int=100, learning_rate:float=0.1, verbose:bool=False):
+        epoch_numbers:int=100, learning_rate:float=0.1, verbose:bool=False, bool_metrics:bool = False, intruder_idx:int = 0):
 
     """
     Train/evaluate a two-hidden-layer MLP classifier with tanh activations via per-sample SGD.
@@ -266,10 +295,7 @@ def mlp_tanh_classifier_2h(x_values, y_values, number_neurons:int, number_hidden
         verbose (bool): If True, prints accuracy statistics and runtime.
 
     Returns:
-        tuple[np.ndarray, np.ndarray, np.ndarray]:
-            weight1: (number_hidden_neurons,  n_features + 1)            # input → H1 (with bias)
-            weight2: (number_hidden_neurons2, number_hidden_neurons + 1) # H1 → H2 (with bias)
-            weight3: (number_neurons,        number_hidden_neurons2 + 1) # H2 → output (with bias)
+        List[dict]: Per-round metrics as produced by `generate_metrics`.
 
     Notes:
         - Classification uses `argmax` over output activations (no softmax).
@@ -281,7 +307,7 @@ def mlp_tanh_classifier_2h(x_values, y_values, number_neurons:int, number_hidden
     quantity_of_train_data = int(np.floor(quantity_of_data * training_data_rate))
     quantity_of_test_data = quantity_of_data - quantity_of_train_data
     
-    percentage_success = []
+    percentage_success, metrics = [], []
     for _ in range(number_of_rounds):
         index_data = np.random.permutation(quantity_of_data)
         x_shuff, y_shuff = x_values[index_data], y_values[index_data]
@@ -328,11 +354,16 @@ def mlp_tanh_classifier_2h(x_values, y_values, number_neurons:int, number_hidden
 
         number_success = eval_classifier(y_real=y_test, y_pred=y_pred_test)
         percentage_success.append(100.0 * number_success / quantity_of_test_data)
+        
+        if bool_metrics: 
+            y_true_is_auth = (y_test.argmax(axis=1) != intruder_idx)
+            y_pred_is_auth = (y_pred_test.argmax(axis=1) != intruder_idx)
+            metrics.append(generate_metrics(y_real=y_true_is_auth, y_pred=y_pred_is_auth))
 
     end_time = time.time()
     if verbose:
         generate_results(percentage_success=percentage_success, time=end_time-start_time, name="MLP-2H(Tanh)")
 
-    return weight1, weight2, weight3
+    return metrics
 
    
